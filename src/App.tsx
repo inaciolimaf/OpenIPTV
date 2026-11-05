@@ -2934,18 +2934,17 @@ export default function App() {
   return (
     <div ref={appRef} className="app" dir={direction}>
       {/* ---- layer 1, the player -------------------------------------------------- */}
-      {/* Only off the TV. AVPlay drives the set's own video plane and never touches this
-          element, so on Tizen it would be an opaque black box sitting on top of the
-          picture for no reason, and one more layer for the compositor to think about. */}
-      {!onTizen() && (
-        <video
-          ref={videoRef}
-          className="video"
-          playsInline
-          muted={false}
-          onDoubleClick={toggleFullscreen}
-        />
-      )}
+      {/* On the TV this starts hidden: AVPlay drives the set's own video plane beneath the
+          page, and a visible element would be an opaque black box over its picture. The player
+          shows it only for a channel hls.js plays there, an Xtream live channel. */}
+      <video
+        ref={videoRef}
+        className="video"
+        playsInline
+        muted={false}
+        style={onTizen() ? { display: "none" } : undefined}
+        onDoubleClick={toggleFullscreen}
+      />
 
       {/*
        * A configured playlist that produced nothing.

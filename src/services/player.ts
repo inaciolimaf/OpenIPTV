@@ -7,14 +7,8 @@ import {
   type Variant,
   variantsFromManifest,
 } from "./hdr";
-import {
-  forgetResolved,
-  refreshResolved,
-  rememberResolved,
-  mightRedirect,
-  resolveRedirect,
-  resolvedFor,
-} from "./liveAddress";
+import { mightRedirect } from "./liveAddress";
+import { createTokenisedLiveLoaders } from "./tokenisedLive";
 import type HlsType from "hls.js";
 import { createRepairingPlaylistLoader } from "./browserRepair";
 import { DEFAULT_INITIAL_BUFFER_SECONDS } from "./manifest";
@@ -214,19 +208,6 @@ const RELOAD_POLICY = {
   },
 };
 
-/**
- * A remembered temporary address gets one try of five seconds. If the token behind it has
- * expired, the fresh address asked for alongside it takes over, rather than retrying a dead one.
- */
-const CACHED_MANIFEST_POLICY = {
-  default: {
-    maxTimeToFirstByteMs: 5000,
-    maxLoadTimeMs: 5000,
-    timeoutRetry: { maxNumRetry: 0, retryDelayMs: 0, maxRetryDelayMs: 0 },
-    errorRetry: { maxNumRetry: 0, retryDelayMs: 0, maxRetryDelayMs: 0 },
-  },
-};
-
 const STALL_TICK_MS = 3000;
 const STALL_LIMIT_MS = 12000;
 
@@ -318,8 +299,15 @@ export class Player {
   private gesture: (() => void) | null = null;
   /** Whether this attempt has already reported why it failed. */
   private failed = false;
-  /** Bumped by every play(), so work started for an earlier channel can tell it is stale. */
-  private attempt = 0;
+  /**
+   * Which engine this channel plays on. AVPlay on a television, except for an Xtream live channel,
+   * which plays through hls.js there as well: such panels redirect to an address that dies within
+   * seconds, and AVPlay keeps reloading the dead one. See services/liveAddress.
+   */
+  private engine: "avplay" | "browser" = onTizen() ? "avplay" : "browser";
+  private get avplayActive(): boolean {
+    return this.engine === "avplay";
+  }
   /** The address AVPlay was last given, which is the manifest the HDR probe reads. */
   private opened = "";
   /** The television's HDR answer for one address, fetched once while the panel is open. */
@@ -366,7 +354,7 @@ export class Player {
 
   /** Where the playhead is, in seconds, or null when neither engine will say. */
   getPosition(): number | null {
-    if (onTizen()) {
+    if (this.avplayActive) {
       try {
         const av = window.webapis?.avplay;
         const state = av?.getState();
@@ -387,7 +375,7 @@ export class Player {
   }
 
   getDuration(): number | null {
-    if (onTizen()) {
+    if (this.avplayActive) {
       try {
         const value = window.webapis?.avplay?.getDuration?.();
         return typeof value === "number" && Number.isFinite(value) ? value / 1000 : null;
@@ -502,7 +490,7 @@ export class Player {
   /** Where the picture is and how much is buffered ahead of it, for the development log. */
   private snapshot(): Record<string, unknown> {
     const video = this.video;
-    if (!video || onTizen()) return {};
+    if (!video || this.avplayActive) return {};
     let ahead = 0;
     for (let index = 0; index < video.buffered.length; index += 1) {
       if (video.buffered.start(index) <= video.currentTime + 0.25) {
@@ -536,7 +524,6 @@ export class Player {
      * the only place the intent survived.
      */
     this.teardown(false);
-    this.attempt += 1;
     this.failed = false;
     this.held = false;
     this.mode = mode;
@@ -556,11 +543,12 @@ export class Player {
     // this point is a failure as far as the viewer is concerned.
     window.clearTimeout(this.watchdog);
     this.watchdog = window.setTimeout(() => this.fail("TIMEOUT"), START_TIMEOUT_MS);
-    devlog("play", { url: where(url), mode, engine: onTizen() ? "avplay" : "browser" });
-    if (!onTizen()) void this.playBrowser(url, browserRepair, startSeconds);
-    else if (mode === "live" && (resolvedFor(url) || mightRedirect(url))) {
-      this.playTizenLive(url, bufferSeconds);
-    } else this.playAVPlay(url, bufferSeconds, startSeconds);
+    this.engine = onTizen() && !(mode === "live" && mightRedirect(url)) ? "avplay" : "browser";
+    // The element sits over AVPlay's hardware plane, so it is only shown while it is the picture.
+    if (this.video && onTizen()) this.video.style.display = this.avplayActive ? "none" : "";
+    devlog("play", { url: where(url), mode, engine: this.engine });
+    if (this.avplayActive) this.playAVPlay(url, bufferSeconds, startSeconds);
+    else void this.playBrowser(url, browserRepair, startSeconds);
   }
 
   /**
@@ -630,72 +618,8 @@ export class Player {
    * called from, but close destroys the instance and the pipeline has to be rebuilt, which
    * is exactly the wrong thing to do when someone is holding the channel key down.
    */
-  /**
-   * A live channel on the television, by way of its temporary address where it has one.
-   *
-   * The same idea as the browser path, see services/liveAddress: a reconnection opens the address
-   * the panel last redirected to and asks for a fresh one alongside, and the first play learns that
-   * address by resolving the redirect itself, because AVPlay never says where it landed. Either
-   * way, a temporary address that fails hands over to the next one instead of to the viewer.
-   */
-  private playTizenLive(url: string, bufferSeconds: number) {
-    const attempt = this.attempt;
-    const stale = () => this.attempt !== attempt || this.failed;
-    const cached = resolvedFor(url);
-    if (cached) {
-      const refresh = refreshResolved(url);
-      devlog("live.cached", { url: where(url), to: where(cached) });
-      this.playAVPlay(cached, bufferSeconds, 0, () => {
-        if (resolvedFor(url) === cached) forgetResolved(url);
-        void refresh.then((fresh) => {
-          if (stale()) return;
-          devlog("live.switch", { to: where(fresh ?? url) });
-          this.playAVPlay(fresh ?? url, bufferSeconds, 0);
-        });
-      });
-      return;
-    }
-
-    void resolveRedirect(url).then((resolved) => {
-      if (stale()) return;
-      if (!resolved) {
-        this.playAVPlay(url, bufferSeconds, 0);
-        return;
-      }
-      devlog("live.resolved", { url: where(url), to: where(resolved) });
-      this.playAVPlay(resolved, bufferSeconds, 0, () => {
-        // The temporary address would not play here, perhaps tied to the client that asked for
-        // it. The original always worked, so it is the one to use.
-        if (resolvedFor(url) === resolved) forgetResolved(url);
-        if (!stale()) this.playAVPlay(url, bufferSeconds, 0);
-      });
-    });
-  }
-
-  /**
-   * `onDead` is where a failure goes instead of to the viewer, once: the address being played
-   * was a temporary one, and there is another to try. The start watchdog is rewound for it, so
-   * the second address gets the full time the first one had.
-   */
-  private playAVPlay(
-    url: string,
-    bufferSeconds: number,
-    startSeconds: number,
-    onDead?: () => void,
-  ) {
+  private playAVPlay(url: string, bufferSeconds: number, startSeconds: number) {
     const av = window.webapis!.avplay!;
-    let handed = false;
-    const die = (code: string) => {
-      if (!onDead || handed || this.failed) {
-        this.fail(code);
-        return;
-      }
-      handed = true;
-      devlog("avplay.dead", { code, url: where(url) });
-      window.clearTimeout(this.watchdog);
-      this.watchdog = window.setTimeout(() => this.fail("TIMEOUT"), START_TIMEOUT_MS);
-      window.setTimeout(onDead, 0);
-    };
     try {
       ensureSurface();
 
@@ -824,9 +748,9 @@ export class Player {
          * arrives first is the one the viewer sees. The message is appended rather than
          * substituted because services/errors.ts matches on the code.
          */
-        onerror: (code) => die(withStatus(String(code), status)),
+        onerror: (code) => this.fail(withStatus(String(code), status)),
         onerrormsg: (code, message) =>
-          die(withStatus(`${String(code)} ${String(message)}`.trim(), status)),
+          this.fail(withStatus(`${String(code)} ${String(message)}`.trim(), status)),
       });
 
       this.emit({ type: "buffering" });
@@ -836,10 +760,10 @@ export class Player {
           av.play(); // READY -> PLAYING
           this.emit({ type: "playing" });
         },
-        (e) => die(codeOf(e)),
+        (e) => this.fail(codeOf(e)),
       );
     } catch (e) {
-      die(codeOf(e));
+      this.fail(codeOf(e));
     }
   }
 
@@ -851,7 +775,7 @@ export class Player {
    */
   setFit(fit: Fit) {
     this.fit = fit;
-    if (onTizen()) {
+    if (this.avplayActive) {
       try {
         window.webapis?.avplay?.setDisplayMethod?.(AVPLAY_MODE[fit]);
       } catch {
@@ -865,7 +789,7 @@ export class Player {
   /** Temporarily silence the audio without changing the live playback clock. */
   setMuted(muted: boolean) {
     this.muted = muted;
-    if (!onTizen()) {
+    if (!this.avplayActive) {
       if (this.video) this.video.muted = muted;
       return;
     }
@@ -917,7 +841,7 @@ export class Player {
    * out, the first of which appeared to do nothing.
    */
   hide() {
-    if (!onTizen()) {
+    if (!this.avplayActive) {
       this.pausedByViewer = !!this.video?.paused;
       this.video?.pause();
       return;
@@ -932,7 +856,7 @@ export class Player {
   }
 
   show() {
-    if (!onTizen()) {
+    if (!this.avplayActive) {
       if (!this.pausedByViewer) void this.video?.play();
       return;
     }
@@ -944,16 +868,7 @@ export class Player {
     }
   }
 
-  /**
-   * `forced` is a fresh temporary address that replaces a remembered one which failed. It is
-   * loaded as it is, with no remembering and no second replacement.
-   */
-  private async playBrowser(
-    url: string,
-    browserRepair: boolean,
-    startSeconds: number,
-    forced?: string,
-  ) {
+  private async playBrowser(url: string, browserRepair: boolean, startSeconds: number) {
     const video = this.video;
     if (!video) return;
     video.muted = this.muted;
@@ -972,13 +887,6 @@ export class Player {
     // then for a channel nobody is watching.
     if (this.video !== video || this.failed) return;
 
-    // A reconnection to a live channel goes straight to the temporary address it last redirected
-    // to, and asks the panel for a fresh one at the same time. See services/liveAddress.
-    const cached = this.mode === "live" && !forced ? resolvedFor(url) : undefined;
-    const source = forced ?? cached ?? url;
-    const refresh = cached ? refreshResolved(url) : undefined;
-    if (cached) devlog("live.cached", { url: where(url), to: where(cached) });
-
     // hls.js first, native second, and not the other way round. Chrome answers "maybe" to
     // canPlayType for HLS and then cannot play it, so asking the browser what it supports
     // sends every desktop down a path that fails. Where hls.js works it is the right
@@ -986,7 +894,7 @@ export class Player {
     // not run.
     if (!Hls.isSupported()) {
       if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = source;
+        video.src = url;
         this.tryPlay(video);
       } else {
         this.fail("NOT_SUPPORTED");
@@ -1002,13 +910,18 @@ export class Player {
      * so every frame behind the playhead is memory spent on something nobody can ask for.
      */
     const hls = new Hls({
-      pLoader: browserRepair ? createRepairingPlaylistLoader(Hls) : undefined,
+      // A live channel goes through the loaders for short lived redirects, which leave any other
+      // playlist exactly as it was. The compatibility repair has a loader of its own.
+      ...(browserRepair
+        ? { pLoader: createRepairingPlaylistLoader(Hls) }
+        : this.mode === "live"
+          ? createTokenisedLiveLoaders(Hls, url)
+          : {}),
       // Fifty per cent further behind live than the three target durations the standard asks
       // for at least, measured on a provider whose playlist reloads hang for twenty seconds at
       // a time: the buffer in front of the playhead is what carries the picture through them.
       liveSyncDurationCount: 4.5,
       playlistLoadPolicy: RELOAD_POLICY,
-      ...(cached ? { manifestLoadPolicy: CACHED_MANIFEST_POLICY } : {}),
       //
       // What is overridden is memory, which is this application's business rather than the
       // specification's: the library assumes a desktop and will happily keep everything it
@@ -1053,25 +966,6 @@ export class Player {
       });
       if (!data.fatal) return;
 
-      // The remembered temporary address is dead, most likely an expired token. Hand over to
-      // the fresh one being generated alongside it rather than spending the recovery budget.
-      const playlistFailure =
-        data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-        /^(manifest|level)Load/.test(String(data.details));
-      if (cached && playlistFailure) {
-        // Only the address that failed. The fresh one may already have replaced it.
-        if (resolvedFor(url) === cached) forgetResolved(url);
-        const attempt = this.attempt;
-        hls.destroy();
-        if (this.hls === hls) this.hls = null;
-        void (refresh ?? Promise.resolve(undefined)).then((fresh) => {
-          if (this.attempt !== attempt || this.video !== video || this.failed) return;
-          devlog("live.switch", { to: where(fresh ?? url) });
-          void this.playBrowser(url, browserRepair, startSeconds, fresh ?? url);
-        });
-        return;
-      }
-
       const recoverable =
         data.type === Hls.ErrorTypes.NETWORK_ERROR || data.type === Hls.ErrorTypes.MEDIA_ERROR;
       if (!recoverable || left-- <= 0) {
@@ -1115,16 +1009,11 @@ export class Player {
       if (this.lastLevel >= 0 && this.lastLevel !== data.level) this.switches += 1;
       this.lastLevel = data.level;
     });
-    // Remember where the panel redirected, for the next reconnection. A remembered or fresh
-    // address is already where it lands, and a redirect from it is the same token moving.
-    if (this.mode === "live" && source === url) {
-      hls.on(Hls.Events.MANIFEST_LOADED, (_event, data) => rememberResolved(url, data.url));
-    }
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       if (this.mode === "finite" && startSeconds > 0) video.currentTime = startSeconds;
       this.tryPlay(video);
     });
-    hls.loadSource(source);
+    hls.loadSource(url);
     hls.attachMedia(video);
   }
 
@@ -1160,7 +1049,7 @@ export class Player {
   }
 
   getStats(): PlaybackStats {
-    if (onTizen()) {
+    if (this.avplayActive) {
       const stats: PlaybackStats = { engine: "AVPlay", switches: this.switches };
       const av = window.webapis!.avplay!;
       let video: Record<string, unknown> = {};
@@ -1291,7 +1180,7 @@ export class Player {
       return success;
     };
 
-    if (!onTizen()) {
+    if (!this.avplayActive) {
       if (!this.video) return finish(false);
       try {
         this.video.currentTime = target;
@@ -1326,7 +1215,7 @@ export class Player {
     // A viewer who has paused is not waiting for permission to start, so the gesture the
     // browser was holding out for is no longer wanted.
     this.ungate();
-    if (onTizen()) {
+    if (this.avplayActive) {
       try {
         window.webapis!.avplay!.pause?.();
       } catch {
@@ -1352,7 +1241,7 @@ export class Player {
    */
   resumePlayback() {
     this.held = false;
-    if (onTizen()) {
+    if (this.avplayActive) {
       try {
         const av = window.webapis!.avplay!;
         if (av.getState() === "PAUSED") av.play();

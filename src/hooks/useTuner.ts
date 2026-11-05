@@ -445,7 +445,11 @@ export function useTuner(options: TunerOptions): Tuner {
       streamFallbackTried.current !== streamKey
     ) {
       streamFallbackTried.current = streamKey;
-      devlog("tuner.fallback", { fault, from: where(target.url), to: where(target.fallbackUrl) });
+      devlog("tuner.fallback", {
+        fault,
+        from: where(target.url),
+        to: where(target.fallbackUrl),
+      });
       const retried = { ...target, url: target.fallbackUrl, fallbackUrl: undefined };
       currentRef.current = retried;
       setCurrent(retried);
