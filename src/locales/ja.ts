@@ -418,6 +418,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${maximum}件中${active}件の接続が有効`,
   "guide.seek": "10秒移動",
+  "guide.scrub": "早送り・巻き戻し、長押しで加速",
+  "guide.jumpPercent": "ジャンプ、5は中間",
+  "seek.target": ({ target, duration }) =>
+    duration ? `移動先 ${target} / ${duration}` : `移動先 ${target}`,
   "search.mediaName": "映画またはシリーズ名",
   "search.mediaAria": "映画またはシリーズを名前で検索",
   "error.seekUnavailable": "このデバイスでは動画をシークできません。",

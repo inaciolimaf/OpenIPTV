@@ -427,6 +427,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${active} van ${maximum} verbindingen actief`,
   "guide.seek": "Tien seconden springen",
+  "guide.scrub": "Vooruit of terug, ingedrukt houden voor sneller",
+  "guide.jumpPercent": "Springen, 5 is het midden",
+  "seek.target": ({ target, duration }) =>
+    duration ? `Naar ${target} van ${duration}` : `Naar ${target}`,
   "search.mediaName": "Naam van film of serie",
   "search.mediaAria": "Films of series op naam zoeken",
   "error.seekUnavailable": "Deze video kan op dit apparaat niet worden doorgespoeld.",

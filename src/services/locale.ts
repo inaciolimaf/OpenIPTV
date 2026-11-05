@@ -256,6 +256,10 @@ const ENGLISH = {
   "guide.clear": "Clear",
   "guide.changeChannel": "Change channel",
   "guide.seek": "Seek ten seconds",
+  "guide.scrub": "Move through it, hold to go faster",
+  "guide.jumpPercent": "Jump, 5 is the middle",
+  "seek.target": ({ target, duration }) =>
+    duration ? `Going to ${target} of ${duration}` : `Going to ${target}`,
   "guide.favourite": "Favourite",
   "guide.hideThis": "Hide this",
   "guide.hideCategory": "Hide category",
@@ -893,6 +897,10 @@ const PERSIAN: Partial<Record<MessageKey, Message>> = {
   "about.qr": "برای دیدن کد منبع یا گزارش مشکل، کد QR را اسکن کنید.",
   "about.qrAlt": ({ url }) => `کد QR برای ${url}`,
   "guide.seek": "ده ثانیه جلو یا عقب بروید",
+  "guide.scrub": "جلو یا عقب، برای سرعت بیشتر نگه دارید",
+  "guide.jumpPercent": "پرش، ۵ وسط است",
+  "seek.target": ({ target, duration }) =>
+    duration ? `رفتن به ${target} از ${duration}` : `رفتن به ${target}`,
   "search.mediaName": "نام فیلم یا سریال",
   "search.mediaAria": "جستجوی فیلم‌ها یا سریال‌ها بر اساس نام",
   "error.seekUnavailable": "در این دستگاه نمی‌توان در این ویدیو جلو یا عقب رفت.",

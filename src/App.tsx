@@ -30,6 +30,7 @@ import {
 } from "./services/lineup";
 import { UNCATEGORISED } from "./services/m3u";
 import { searchChannels } from "./services/search";
+import { percentTarget, SCRUB_SETTLE_MS, scrubStep, scrubTarget } from "./services/scrub";
 import { KEY, registerRemoteKeys, useRemote } from "./hooks/useRemote";
 import { ChannelList } from "./components/ChannelList";
 import { Sidebar } from "./components/Sidebar";
@@ -1949,6 +1950,81 @@ export default function App() {
     [chrome.say, t, tuner.seek],
   );
 
+  /*
+   * Left, right and the digits during a film or an episode. See services/scrub for why the seek
+   * waits for the pressing to stop.
+   */
+  const scrub = useRef<{
+    target: number;
+    direction: number;
+    presses: number;
+    timer: number;
+  } | null>(null);
+  const finitePosition = useRef(tuner.position);
+  finitePosition.current = tuner.position;
+
+  // A pending seek belongs to the film it was aimed at, so a change of film drops it.
+  useEffect(() => {
+    if (!current) return;
+    return () => {
+      window.clearTimeout(scrub.current?.timer);
+      scrub.current = null;
+    };
+  }, [current]);
+
+  const announceSeek = useCallback(
+    (target: number) => {
+      chrome.raiseBanner();
+      chrome.say(
+        t("seek.target", {
+          target: clock(target),
+          duration: tuner.duration ? clock(tuner.duration) : "",
+        }),
+      );
+    },
+    [chrome.raiseBanner, chrome.say, t, tuner.duration],
+  );
+
+  const commitSeek = useCallback(
+    (target: number) => {
+      const delta = target - (finitePosition.current ?? 0);
+      if (Math.abs(delta) >= 1) seekFinite(delta);
+    },
+    [seekFinite],
+  );
+
+  const scrubBy = useCallback(
+    (direction: 1 | -1) => {
+      const pending = scrub.current;
+      const presses = pending && pending.direction === direction ? pending.presses + 1 : 0;
+      const from = pending ? pending.target : (finitePosition.current ?? 0);
+      const target = scrubTarget(from, direction * scrubStep(presses), tuner.duration);
+      window.clearTimeout(pending?.timer);
+      const timer = window.setTimeout(() => {
+        scrub.current = null;
+        commitSeek(target);
+      }, SCRUB_SETTLE_MS);
+      scrub.current = { target, direction, presses, timer };
+      announceSeek(target);
+    },
+    [announceSeek, commitSeek, tuner.duration],
+  );
+
+  const jumpToPercent = useCallback(
+    (digit: number) => {
+      if (!tuner.duration) {
+        chrome.say(t("error.seekUnavailable"));
+        return;
+      }
+      window.clearTimeout(scrub.current?.timer);
+      scrub.current = null;
+      const target = percentTarget(digit, tuner.duration);
+      announceSeek(target);
+      commitSeek(target);
+    },
+    [announceSeek, chrome.say, commitSeek, t, tuner.duration],
+  );
+
   /**
    * Transport keys. Checklist 2.3 wants every playback button on the remote to work.
    * Off a stream they do nothing and say nothing, which is what the input guide specifies
@@ -2090,6 +2166,13 @@ export default function App() {
         }
         return;
       }
+      // A film has no channel to step to. Channel keys over one show what is playing instead.
+      const watchingFinite = view === "watch" && current?.mode === "finite";
+      if (watchingFinite && (code === KEY.CH_UP || code === KEY.CH_DOWN)) {
+        event.preventDefault();
+        chrome.raiseBanner();
+        return;
+      }
       // Up goes forwards, towards the higher channel number, which is what channel up has
       // meant on every television anyone has owned. It was the other way round.
       if (code === KEY.CH_UP) {
@@ -2158,6 +2241,12 @@ export default function App() {
         return;
       }
 
+      // During a film a digit is a place in it rather than a channel: 5 is the middle.
+      if (watchingFinite && code >= 48 && code <= 57) {
+        event.preventDefault();
+        jumpToPercent(code - 48);
+        return;
+      }
       // A channel number can be dialled from anywhere.
       if (code >= 48 && code <= 57) {
         event.preventDefault();
@@ -2187,7 +2276,23 @@ export default function App() {
         if (owned) event.preventDefault();
 
         /*
-         * Law 1, before anything else and with no exceptions: up and down change channel.
+         * A film or an episode is not a channel. Up and down show what is playing rather than
+         * dropping the viewer onto live television, and left and right move through it. OK still
+         * opens the list and RETURN still goes back, so nothing here can trap anybody.
+         */
+        if (watchingFinite) {
+          if (code === KEY.UP || code === KEY.DOWN) {
+            chrome.raiseBanner();
+            return;
+          }
+          if (code === inlineStart || code === inlineEnd) {
+            scrubBy(code === inlineEnd ? 1 : -1);
+            return;
+          }
+        }
+
+        /*
+         * Law 1, before anything else on live television: up and down change channel.
          *
          * Ahead of every other consideration on this screen, including a focused button and
          * including a channel that has failed. There is no state in this application where
@@ -2645,6 +2750,8 @@ export default function App() {
       retryGuide,
       inlineStart,
       inlineEnd,
+      scrubBy,
+      jumpToPercent,
     ],
   );
 

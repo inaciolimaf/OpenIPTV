@@ -421,6 +421,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${active} из ${maximum} подключений активно`,
   "guide.seek": "Перемотать на десять секунд",
+  "guide.scrub": "Перемотка, удерживайте для ускорения",
+  "guide.jumpPercent": "Переход, 5 — середина",
+  "seek.target": ({ target, duration }) =>
+    duration ? `Переход к ${target} из ${duration}` : `Переход к ${target}`,
   "search.mediaName": "Название фильма или сериала",
   "search.mediaAria": "Искать фильмы или сериалы по названию",
   "error.seekUnavailable": "На этом устройстве нельзя перематывать это видео.",

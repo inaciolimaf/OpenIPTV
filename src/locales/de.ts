@@ -436,6 +436,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${active} von ${maximum} Verbindungen aktiv`,
   "guide.seek": "Zehn Sekunden springen",
+  "guide.scrub": "Spulen, gedrückt halten für schneller",
+  "guide.jumpPercent": "Springen, 5 ist die Mitte",
+  "seek.target": ({ target, duration }) =>
+    duration ? `Springe zu ${target} von ${duration}` : `Springe zu ${target}`,
   "search.mediaName": "Film- oder Serienname",
   "search.mediaAria": "Filme oder Serien nach Namen durchsuchen",
   "error.seekUnavailable": "Dieses Video kann auf diesem Gerät nicht gespult werden.",

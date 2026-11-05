@@ -432,6 +432,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${active} connexions actives sur ${maximum}`,
   "guide.seek": "Avancer ou reculer de dix secondes",
+  "guide.scrub": "Avancer ou reculer, maintenir pour accélérer",
+  "guide.jumpPercent": "Sauter, 5 est le milieu",
+  "seek.target": ({ target, duration }) =>
+    duration ? `Aller à ${target} sur ${duration}` : `Aller à ${target}`,
   "search.mediaName": "Nom du film ou de la série",
   "search.mediaAria": "Rechercher les films ou séries par nom",
   "error.seekUnavailable": "Ce contenu ne peut pas être parcouru sur cet appareil.",

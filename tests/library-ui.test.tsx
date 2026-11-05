@@ -323,6 +323,46 @@ test("movie playback uses a finite target and transport keys seek ten seconds", 
   expect(seekChanges).toEqual([10, -10]);
 });
 
+test("during a film up and down stay on it, and left and right seek once pressing stops", async () => {
+  await startMovie();
+  setPlaybackTime(600, 7200);
+  await settle(1000);
+
+  press(KEY.UP);
+  press(KEY.DOWN);
+  await settle(600);
+  expect(played).toHaveLength(1);
+  expect(panelOpen()).toBe(false);
+
+  press(KEY.RIGHT);
+  press(KEY.RIGHT);
+  press(KEY.RIGHT);
+  press(KEY.LEFT);
+  await settle(0);
+  expect(seekChanges).toEqual([]);
+  expect(document.body.textContent).toContain("Going to 10:20 of 2:00:00");
+  await settle(600);
+  expect(seekChanges).toEqual([20]);
+  expect(played).toHaveLength(1);
+  expect(panelOpen()).toBe(false);
+});
+
+test("during a film channel keys stay on it and a digit jumps to that tenth", async () => {
+  await startMovie();
+  setPlaybackTime(600, 7200);
+  await settle(1000);
+
+  press(KEY.CH_UP);
+  press(KEY.CH_DOWN);
+  await settle(600);
+  expect(played).toHaveLength(1);
+
+  press(48 + 5);
+  await settle(0);
+  expect(seekChanges).toEqual([3000]);
+  expect(played).toHaveLength(1);
+});
+
 test("movie Previous and Next stay inside the category that launched playback", async () => {
   const fetchImplementation = vi.fn(async (input: string | URL) => {
     const url = new URL(String(input));

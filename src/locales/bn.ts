@@ -406,6 +406,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${maximum}টির মধ্যে ${active}টি সংযোগ সক্রিয়`,
   "guide.seek": "দশ সেকেন্ড এগিয়ে বা পিছিয়ে নিন",
+  "guide.scrub": "এগিয়ে বা পিছিয়ে যান, দ্রুত করতে চেপে ধরুন",
+  "guide.jumpPercent": "লাফ দিন, 5 হলো মাঝখান",
+  "seek.target": ({ target, duration }) =>
+    duration ? `যাচ্ছে ${target} এর মধ্যে ${duration}` : `যাচ্ছে ${target}`,
   "search.mediaName": "সিনেমা বা সিরিজের নাম",
   "search.mediaAria": "নাম দিয়ে সিনেমা বা সিরিজ খুঁজুন",
   "error.seekUnavailable": "এই ডিভাইসে ভিডিওটি এগিয়ে বা পিছিয়ে নেওয়া যায় না।",

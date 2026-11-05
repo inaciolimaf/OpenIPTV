@@ -409,6 +409,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${maximum}개 중 ${active}개 연결 활성`,
   "guide.seek": "10초 이동",
+  "guide.scrub": "앞뒤로 이동, 길게 누르면 빨라짐",
+  "guide.jumpPercent": "건너뛰기, 5는 중간",
+  "seek.target": ({ target, duration }) =>
+    duration ? `이동 ${target} / ${duration}` : `이동 ${target}`,
   "search.mediaName": "영화 또는 시리즈 이름",
   "search.mediaAria": "영화 또는 시리즈를 이름으로 검색",
   "error.seekUnavailable": "이 기기에서는 이 동영상을 탐색할 수 없습니다.",

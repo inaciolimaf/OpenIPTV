@@ -422,6 +422,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${active} dari ${maximum} koneksi aktif`,
   "guide.seek": "Geser sepuluh detik",
+  "guide.scrub": "Maju atau mundur, tahan untuk lebih cepat",
+  "guide.jumpPercent": "Lompat, 5 adalah tengah",
+  "seek.target": ({ target, duration }) =>
+    duration ? `Menuju ${target} dari ${duration}` : `Menuju ${target}`,
   "search.mediaName": "Nama film atau serial",
   "search.mediaAria": "Cari film atau serial berdasarkan nama",
   "error.seekUnavailable": "Video ini tidak dapat digeser pada perangkat ini.",

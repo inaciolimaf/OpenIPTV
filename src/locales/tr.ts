@@ -417,6 +417,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${maximum} bağlantıdan ${active} tanesi etkin`,
   "guide.seek": "On saniye atla",
+  "guide.scrub": "İleri veya geri, hızlanmak için basılı tutun",
+  "guide.jumpPercent": "Atla, 5 ortasıdır",
+  "seek.target": ({ target, duration }) =>
+    duration ? `Gidiliyor ${target} / ${duration}` : `Gidiliyor ${target}`,
   "search.mediaName": "Film veya dizi adı",
   "search.mediaAria": "Filmleri veya dizileri ada göre ara",
   "error.seekUnavailable": "Bu video bu cihazda ileri veya geri alınamıyor.",

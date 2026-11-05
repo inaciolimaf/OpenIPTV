@@ -407,6 +407,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${maximum} में से ${active} कनेक्शन सक्रिय`,
   "guide.seek": "दस सेकंड आगे या पीछे जाएँ",
+  "guide.scrub": "आगे या पीछे जाएँ, तेज़ी के लिए दबाए रखें",
+  "guide.jumpPercent": "छलांग, 5 बीच है",
+  "seek.target": ({ target, duration }) =>
+    duration ? `जा रहे हैं ${target} में से ${duration}` : `जा रहे हैं ${target}`,
   "search.mediaName": "फ़िल्म या सीरीज़ का नाम",
   "search.mediaAria": "फ़िल्में या सीरीज़ नाम से खोजें",
   "error.seekUnavailable": "इस डिवाइस पर इस वीडियो में आगे या पीछे नहीं जा सकते।",

@@ -410,6 +410,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${active} من ${maximum} اتصالات نشطة`,
   "guide.seek": "تقديم أو إرجاع عشر ثوانٍ",
+  "guide.scrub": "تقديم أو إرجاع، اضغط مطولًا للإسراع",
+  "guide.jumpPercent": "انتقال، 5 هو المنتصف",
+  "seek.target": ({ target, duration }) =>
+    duration ? `الانتقال إلى ${target} من ${duration}` : `الانتقال إلى ${target}`,
   "search.mediaName": "اسم الفيلم أو المسلسل",
   "search.mediaAria": "البحث عن الأفلام أو المسلسلات بالاسم",
   "error.seekUnavailable": "لا يمكن تقديم هذا الفيديو أو إرجاعه على هذا الجهاز.",

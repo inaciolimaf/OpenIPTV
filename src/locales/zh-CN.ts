@@ -401,6 +401,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${maximum} 个连接中有 ${active} 个处于活动状态`,
   "guide.seek": "快进或快退十秒",
+  "guide.scrub": "快进或快退，按住加速",
+  "guide.jumpPercent": "跳转，5 为中间",
+  "seek.target": ({ target, duration }) =>
+    duration ? `跳转到 ${target} / ${duration}` : `跳转到 ${target}`,
   "search.mediaName": "电影或剧集名称",
   "search.mediaAria": "按名称搜索电影或剧集",
   "error.seekUnavailable": "此设备无法跳转该视频。",

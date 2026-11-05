@@ -60,6 +60,7 @@ export function PlaybackBanner({
   const item = target ?? channel;
   const finite = target?.mode === "finite";
   const inlineEndArrow = direction === "rtl" ? "←" : "→";
+  const inlineStartArrow = direction === "rtl" ? "→" : "←";
   const displayName = item.name || t("channel.unnamed");
   return (
     <div className="pb-stack">
@@ -120,10 +121,10 @@ export function PlaybackBanner({
         items={
           finite
             ? [
-                { keys: ["Rewind", "Forward"], label: t("guide.seek") },
+                { keys: [inlineStartArrow, inlineEndArrow], label: t("guide.scrub") },
+                { keys: ["0–9"], label: t("guide.jumpPercent") },
                 { keys: ["Play", "Pause"], label: t("common.playPause") },
-                { keys: ["Stop"], label: t("common.stop") },
-                { keys: ["Return", inlineEndArrow], label: t("guide.hideThis") },
+                { keys: ["Return"], label: t("guide.hideThis") },
               ]
             : [
                 { keys: ["\u2191", "\u2193"], label: t("guide.changeChannel") },

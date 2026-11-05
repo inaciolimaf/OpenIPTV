@@ -431,6 +431,10 @@ export default {
   "playlist.accountConnections": ({ active, maximum }) =>
     `${active} de ${maximum} conexiones activas`,
   "guide.seek": "Saltar diez segundos",
+  "guide.scrub": "Avanzar o retroceder, mantén para ir más rápido",
+  "guide.jumpPercent": "Saltar, 5 es la mitad",
+  "seek.target": ({ target, duration }) =>
+    duration ? `Yendo a ${target} de ${duration}` : `Yendo a ${target}`,
   "search.mediaName": "Nombre de película o serie",
   "search.mediaAria": "Buscar películas o series por nombre",
   "error.seekUnavailable": "Este vídeo no permite desplazarse en este dispositivo.",

@@ -122,7 +122,9 @@ Break one of these and the app fails on hardware no test here owns. The reasonin
 
 - **The screen is a stack and a layer only shows when nothing above it is open.** `App.tsx`
   names the five layers. A new overlay belongs in that stack or nowhere.
-- **The four laws of the key model.** At the picture, up and down always change channel. OK does
+- **The four laws of the key model.** At the picture of a live channel, up and down always change
+  channel. During a film or an episode they only show the banner, left and right seek (accelerating,
+  committed once pressing stops) and the digits jump to tenths of it. OK does
   the obvious thing where it is pressed. Left and right move within whatever is showing. RETURN
   always goes back, and closes the app only when there is nothing left to close.
   `tests/keyLaws.test.tsx` enforces them.
