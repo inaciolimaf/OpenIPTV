@@ -83,6 +83,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.history.replaceState(null, "", "/");
   cleanup();
   vi.unstubAllGlobals();
   vi.doUnmock("../src/services/player");
@@ -327,6 +328,7 @@ test("holding Red during search keeps focus in search", async () => {
 });
 
 test("the on-screen Smart Remote red key toggles category visibility", async () => {
+  window.history.replaceState(null, "", "/?remote");
   await mountApp(PLAYLIST);
   press(KEY.LEFT);
   act(() => screen.getByRole("button", { name: "Show Smart Remote" }).click());
@@ -340,6 +342,7 @@ test("the on-screen Smart Remote red key toggles category visibility", async () 
 });
 
 test("holding Red on the on-screen Smart Remote reveals hidden categories", async () => {
+  window.history.replaceState(null, "", "/?remote");
   await mountApp(PLAYLIST, { hiddenCategories: ["News"] });
   press(KEY.LEFT);
   act(() => screen.getByRole("button", { name: "Show Smart Remote" }).click());

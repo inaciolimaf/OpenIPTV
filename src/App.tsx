@@ -3277,7 +3277,11 @@ export default function App() {
           }
         />
       </div>
-      {settings.showClock && !showSettings && <Clock />}
+      {/* Over a picture nobody has asked about, nothing but the picture. The clock comes back
+          with the banner, on any key. */}
+      {settings.showClock &&
+        !showSettings &&
+        !(view === "watch" && current && !chrome.showing) && <Clock />}
 
       {/* ---- layer 4, the modals --------------------------------------------------- */}
       {showSettings && (
@@ -3318,7 +3322,7 @@ export default function App() {
 
       {/* The whole remote's directional pad in one place, so the app can be driven without
           one. It sends the same keys, so it needs to know nothing about what they do. */}
-      {configured && <PointerPad shown={pointerAwake} />}
+      {configured && <PointerPad shown={pointerAwake && view !== "watch"} />}
 
       {/* import.meta.env.DEV first, so a production build sees `false && ...` here and the
           bundler removes both the branch and the component it refers to. */}

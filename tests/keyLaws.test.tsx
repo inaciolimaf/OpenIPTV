@@ -48,6 +48,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.history.replaceState(null, "", "/");
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -172,19 +173,22 @@ test("holding OK toggles playback information while a stream is loading", async 
   );
 });
 
-test("the clock remains visible everywhere except Settings", async () => {
+test("the clock shows in the menus and with the banner, never over a bare picture", async () => {
   await mount();
   expect(document.querySelector(".clock")).toBeTruthy();
 
-  press(KEY.ENTER);
+  press(KEY.ENTER); // watching, banner up
   await settle();
+  expect(document.querySelector(".clock")).toBeTruthy();
+
+  press(KEY.BACK); // banner away: only the picture
+  expect(document.querySelector(".clock")).toBeNull();
+
+  press(KEY.UP); // any key brings the banner, and the clock with it
   expect(document.querySelector(".clock")).toBeTruthy();
 
   press(KEY.YELLOW);
   expect(document.querySelector(".clock")).toBeNull();
-
-  press(KEY.BACK);
-  expect(document.querySelector(".clock")).toBeTruthy();
 });
 
 test("law 4: RETURN clears the screen before it offers to close the app", async () => {
@@ -364,6 +368,7 @@ test("settings mutes audio without restarting playback", async () => {
 });
 
 test("the debug Smart Remote starts closed and wires volume controls", async () => {
+  window.history.replaceState(null, "", "/?remote");
   await mount();
   press(KEY.ENTER);
   assert.ok(screen.getByRole("button", { name: "Show Smart Remote" }));
@@ -379,6 +384,7 @@ test("the debug Smart Remote starts closed and wires volume controls", async () 
 });
 
 test("holding OK on the debug Smart Remote toggles playback information", async () => {
+  window.history.replaceState(null, "", "/?remote");
   await mount();
   press(KEY.ENTER);
   press(KEY.BACK);

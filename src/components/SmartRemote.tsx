@@ -30,8 +30,8 @@ import { Icon } from "./Icon";
 export const remoteVisible = (): boolean => {
   if (!import.meta.env.DEV) return false;
   if (typeof window === "undefined") return false;
-  if (new URLSearchParams(window.location.search).has("remote")) return true;
-  return !("webapis" in window);
+  // Only when asked for, so a desktop browser shows the app as the television does.
+  return new URLSearchParams(window.location.search).has("remote");
 };
 
 const NAMES: Record<number, string> = {
