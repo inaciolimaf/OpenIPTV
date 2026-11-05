@@ -1,4 +1,5 @@
 import { devlog, where } from "./devlog";
+import { loadHlsLibrary } from "./hlsLoader";
 import {
   type HdrFormat,
   hdrFormat,
@@ -30,11 +31,7 @@ import { DEFAULT_INITIAL_BUFFER_SECONDS } from "./manifest";
  * playBrowser, which the TV path never reaches, so if a packaged widget could not fetch a
  * second chunk it would never be asked to.
  */
-let hlsModule: Promise<typeof HlsType> | null = null;
-const loadHls = () => {
-  hlsModule ??= import("hls.js").then((m) => m.default);
-  return hlsModule;
-};
+const loadHls = loadHlsLibrary;
 
 /**
  * One play/stop interface over two very different engines.
