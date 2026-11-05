@@ -1,5 +1,12 @@
 import { devlog, where } from "./devlog";
 import {
+  type HdrFormat,
+  hdrFormat,
+  hdrFromVariants,
+  type Variant,
+  variantsFromManifest,
+} from "./hdr";
+import {
   forgetResolved,
   refreshResolved,
   rememberResolved,
@@ -166,6 +173,8 @@ export interface PlaybackStats {
   level?: number;
   levels?: number;
   switches: number;
+  /** What the manifest declares, see services/hdr. Absent until it is known. */
+  hdr?: HdrFormat;
 }
 
 /**
@@ -314,6 +323,10 @@ export class Player {
   private failed = false;
   /** Bumped by every play(), so work started for an earlier channel can tell it is stale. */
   private attempt = 0;
+  /** The address AVPlay was last given, which is the manifest the HDR probe reads. */
+  private opened = "";
+  /** The television's HDR answer for one address, fetched once while the panel is open. */
+  private hdrProbe: { url: string; variants?: Variant[] } | null = null;
   private fit: Fit = "fit";
   private watchdog: number | undefined;
   private sink: (e: PlayerEvent) => void;
@@ -693,6 +706,7 @@ export class Player {
       if (state !== "NONE" && state !== "IDLE") av.stop(); // any state -> IDLE
 
       av.open(url); // NONE|IDLE -> IDLE
+      this.opened = url;
       if (this.mode === "finite" && startSeconds > 0) {
         if (av.seekTo) {
           try {
@@ -1117,6 +1131,37 @@ export class Player {
     hls.attachMedia(video);
   }
 
+  /**
+   * The HDR format on the television, where AVPlay does not say.
+   *
+   * The manifest is fetched once per address, and only because somebody is looking at the
+   * playback information, which is the only caller. Only an .m3u8 is read: an MPEG-TS address is
+   * an endless body. The answer arrives on a later read, which the panel makes every second.
+   */
+  private probeHdr(bitrate?: number): HdrFormat | undefined {
+    const url = this.opened;
+    if (!url) return undefined;
+    if (this.hdrProbe?.url !== url) {
+      const probe: { url: string; variants?: Variant[] } = { url };
+      this.hdrProbe = probe;
+      if (extensionOf(url) !== "m3u8") {
+        probe.variants = [];
+      } else {
+        void fetch(url, { cache: "no-store" })
+          .then((response) => (response.ok ? response.text() : ""))
+          .then((text) => {
+            probe.variants = variantsFromManifest(text);
+          })
+          .catch(() => {
+            probe.variants = [];
+          });
+      }
+      return undefined;
+    }
+    if (!this.hdrProbe.variants) return undefined;
+    return hdrFromVariants(this.hdrProbe.variants, bitrate);
+  }
+
   getStats(): PlaybackStats {
     if (onTizen()) {
       const stats: PlaybackStats = { engine: "AVPlay", switches: this.switches };
@@ -1159,6 +1204,7 @@ export class Player {
         if (scan === 0) stats.scan = "interlaced";
         if (scan === 1) stats.scan = "progressive";
       } catch {}
+      stats.hdr = this.probeHdr(stats.bitrate);
       return stats;
     }
 
@@ -1179,6 +1225,14 @@ export class Player {
     stats.bitrate = finite(level?.bitrate);
     stats.bandwidth = finite(hls?.bandwidthEstimate);
     stats.frameRate = finite(level?.frameRate);
+    if (level) {
+      const attrs = (level.attrs ?? {}) as Record<string, string | undefined>;
+      stats.hdr = hdrFormat({
+        videoRange: attrs["VIDEO-RANGE"] ?? level.videoRange,
+        codecs: attrs.CODECS,
+        supplementalCodecs: attrs["SUPPLEMENTAL-CODECS"],
+      });
+    }
 
     if (video) {
       for (let index = 0; index < video.buffered.length; index += 1) {
