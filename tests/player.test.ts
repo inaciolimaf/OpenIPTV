@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import assert from "node:assert/strict";
 import { Player, onTizen, type PlayerEvent } from "../src/services/player";
 
 interface FakeHlsInstance {
   source: string;
+  config: Record<string, unknown>;
   emit(event: string, data: unknown): void;
 }
 
@@ -21,6 +22,7 @@ vi.mock("hls.js", () => {
       ERROR: "error",
       LEVEL_SWITCHED: "levelSwitch",
       MANIFEST_PARSED: "manifestParsed",
+      MANIFEST_LOADED: "manifestLoaded",
     };
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
     currentLevel = 2;
@@ -39,7 +41,9 @@ vi.mock("hls.js", () => {
     ];
     handlers = new Map<string, HlsHandler>();
     source = "";
-    constructor() {
+    config: Record<string, unknown>;
+    constructor(config: Record<string, unknown> = {}) {
+      this.config = config;
       hlsMock.instance = this;
     }
     on(event: string, handler: HlsHandler) {
@@ -830,4 +834,142 @@ test("browser finite unsupported containers report the media element failure", a
     ["NotSupportedError"],
   );
   browser.stop();
+});
+
+describe("live channels behind a redirecting panel", () => {
+  const PANEL = "https://panel.invalid/live/1.m3u8";
+  const TOKEN = "https://cdn.invalid/token-a/index.m3u8";
+  const FRESH = "https://cdn.invalid/token-b/index.m3u8";
+
+  const browserPlayer = async () => {
+    delete (window as unknown as { webapis?: unknown }).webapis;
+    hlsMock.supported = true;
+    const browser = new Player(() => {});
+    browser.attach(document.createElement("video"));
+    return browser;
+  };
+
+  test("reloads give up after five seconds and the buffer is half as deep again", async () => {
+    const browser = await browserPlayer();
+    browser.play("https://other.invalid/live/9.m3u8");
+    await vi.advanceTimersByTimeAsync(0);
+    const config = hlsMock.instance?.config ?? {};
+    expect(config.liveSyncDurationCount).toBe(4.5);
+    expect(config.maxBufferLength).toBe(45);
+    expect(config.maxMaxBufferLength).toBe(45);
+    expect(config.playlistLoadPolicy).toMatchObject({
+      default: { maxTimeToFirstByteMs: 5000, maxLoadTimeMs: 5000 },
+    });
+    expect(config.manifestLoadPolicy).toBeUndefined();
+    browser.stop();
+  });
+
+  test("a reconnection goes straight to the remembered address and refreshes it", async () => {
+    const fetcher = vi.fn(async () => ({ ok: true, url: FRESH, body: null }) as unknown as Response);
+    vi.stubGlobal("fetch", fetcher);
+    const browser = await browserPlayer();
+
+    browser.play(PANEL);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hlsMock.instance?.source).toBe(PANEL);
+    hlsMock.instance?.emit("manifestLoaded", { url: TOKEN });
+
+    browser.play(PANEL);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hlsMock.instance?.source).toBe(TOKEN);
+    expect(hlsMock.instance?.config.manifestLoadPolicy).toBeDefined();
+    expect(fetcher).toHaveBeenCalledWith(PANEL, { cache: "no-store" });
+    browser.stop();
+    vi.unstubAllGlobals();
+  });
+
+  test("a dead remembered address hands over to the fresh one", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, url: FRESH, body: null }) as unknown as Response),
+    );
+    const browser = await browserPlayer();
+    browser.play(PANEL.replace("1.m3u8", "2.m3u8"));
+    await vi.advanceTimersByTimeAsync(0);
+    hlsMock.instance?.emit("manifestLoaded", { url: TOKEN });
+
+    browser.play(PANEL.replace("1.m3u8", "2.m3u8"));
+    await vi.advanceTimersByTimeAsync(0);
+    const cachedAttempt = hlsMock.instance;
+    expect(cachedAttempt?.source).toBe(TOKEN);
+    cachedAttempt?.emit("error", {
+      fatal: true,
+      type: "networkError",
+      details: "manifestLoadError",
+      response: { code: 403 },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hlsMock.instance).not.toBe(cachedAttempt);
+    expect(hlsMock.instance?.source).toBe(FRESH);
+    expect(hlsMock.instance?.config.manifestLoadPolicy).toBeUndefined();
+    browser.stop();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("live channels behind a redirecting panel, on the television", () => {
+  const panel = (id: number) => `http://panel.invalid/live/user/pass/${id}.m3u8`;
+  const token = (name: string) => `http://cdn.invalid/${name}/index.m3u8`;
+  const opened = () => av.calls.filter((call) => call.startsWith("open:"));
+  const answer = (url: string) =>
+    vi.fn(async () => ({ ok: true, url, body: null }) as unknown as Response);
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  test("an address that is not an Xtream channel opens at once, as before", () => {
+    vi.stubGlobal("fetch", answer(token("never")));
+    player.play("http://example.invalid/a.m3u8");
+    expect(opened()).toEqual(["open:http://example.invalid/a.m3u8"]);
+  });
+
+  test("the first play resolves the redirect and opens the temporary address", async () => {
+    vi.stubGlobal("fetch", answer(token("first")));
+    player.play(panel(101));
+    expect(opened()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(opened()).toEqual([`open:${token("first")}`]);
+  });
+
+  test("a reconnection opens the remembered address at once and refreshes it", async () => {
+    const fetcher = answer(token("one"));
+    vi.stubGlobal("fetch", fetcher);
+    player.play(panel(102));
+    await vi.advanceTimersByTimeAsync(0);
+
+    player.play(panel(102));
+    expect(opened().at(-1)).toBe(`open:${token("one")}`);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  test("a dead remembered address hands over to the fresh one without a fault", async () => {
+    vi.stubGlobal("fetch", answer(token("old")));
+    player.play(panel(103));
+    await vi.advanceTimersByTimeAsync(0);
+    vi.stubGlobal("fetch", answer(token("new")));
+
+    player.play(panel(103));
+    expect(opened().at(-1)).toBe(`open:${token("old")}`);
+    av.listener?.onerror?.("PLAYER_ERROR_CONNECTION_FAILED");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(opened().at(-1)).toBe(`open:${token("new")}`);
+    expect(codes()).toEqual([]);
+  });
+
+  test("a temporary address the set cannot play falls back to the original", async () => {
+    vi.stubGlobal("fetch", answer(token("bound")));
+    player.play(panel(104));
+    await vi.advanceTimersByTimeAsync(0);
+    av.listener?.onerror?.("PLAYER_ERROR_CONNECTION_FAILED");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(opened().at(-1)).toBe(`open:${panel(104)}`);
+    expect(codes()).toEqual([]);
+
+    av.listener?.onerror?.("PLAYER_ERROR_CONNECTION_FAILED");
+    expect(codes()).toEqual(["PLAYER_ERROR_CONNECTION_FAILED"]);
+  });
 });

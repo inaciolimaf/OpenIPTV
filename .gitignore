@@ -9,6 +9,7 @@ build/
 .idea/
 coverage/
 *.log
+logs/
 
 # Signing material. Nothing here is tracked today and nothing should be: an author certificate is
 # permanent, unrecoverable and tied to the published application, and a distributor certificate

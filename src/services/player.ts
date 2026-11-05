@@ -1,3 +1,12 @@
+import { devlog, where } from "./devlog";
+import {
+  forgetResolved,
+  refreshResolved,
+  rememberResolved,
+  mightRedirect,
+  resolveRedirect,
+  resolvedFor,
+} from "./liveAddress";
 import type HlsType from "hls.js";
 import { createRepairingPlaylistLoader } from "./browserRepair";
 import { DEFAULT_INITIAL_BUFFER_SECONDS } from "./manifest";
@@ -183,6 +192,35 @@ const START_TIMEOUT_MS = 30000;
  * has waited twelve seconds for a frozen picture would have given up on it anyway. It is
  * reported as an ordinary failure, so the automatic retry picks it up like any other.
  */
+/**
+ * Reloads of a live playlist give up after five seconds and try again at once.
+ *
+ * hls.js waits ten seconds for the first byte by default, and measured here a reload that hangs
+ * does so for twenty, by which time a third of the buffer has gone on nothing. A reload normally
+ * answers in a quarter of a second, so five seconds is already twenty times that.
+ */
+const RELOAD_POLICY = {
+  default: {
+    maxTimeToFirstByteMs: 5000,
+    maxLoadTimeMs: 5000,
+    timeoutRetry: { maxNumRetry: 4, retryDelayMs: 0, maxRetryDelayMs: 0 },
+    errorRetry: { maxNumRetry: 4, retryDelayMs: 500, maxRetryDelayMs: 2000 },
+  },
+};
+
+/**
+ * A remembered temporary address gets one try of five seconds. If the token behind it has
+ * expired, the fresh address asked for alongside it takes over, rather than retrying a dead one.
+ */
+const CACHED_MANIFEST_POLICY = {
+  default: {
+    maxTimeToFirstByteMs: 5000,
+    maxLoadTimeMs: 5000,
+    timeoutRetry: { maxNumRetry: 0, retryDelayMs: 0, maxRetryDelayMs: 0 },
+    errorRetry: { maxNumRetry: 0, retryDelayMs: 0, maxRetryDelayMs: 0 },
+  },
+};
+
 const STALL_TICK_MS = 3000;
 const STALL_LIMIT_MS = 12000;
 
@@ -274,6 +312,8 @@ export class Player {
   private gesture: (() => void) | null = null;
   /** Whether this attempt has already reported why it failed. */
   private failed = false;
+  /** Bumped by every play(), so work started for an earlier channel can tell it is stale. */
+  private attempt = 0;
   private fit: Fit = "fit";
   private watchdog: number | undefined;
   private sink: (e: PlayerEvent) => void;
@@ -367,6 +407,7 @@ export class Player {
       if (this.held || this.seeking) return; // paused or seeking on purpose is not a stall
       const now = this.getPosition();
       if (now === null) return;
+      devlog("tick", this.snapshot());
       // A tenth of a second, so a clock that only ticks per frame still counts as moving.
       if (now > this.lastPosition + 0.1) {
         this.lastPosition = now;
@@ -374,6 +415,7 @@ export class Player {
         return;
       }
       this.stalledFor += STALL_TICK_MS;
+      devlog("frozen", { stalledFor: this.stalledFor, ...this.snapshot() });
       if (this.stalledFor < STALL_LIMIT_MS) return;
       window.clearInterval(this.progress);
       this.progress = undefined;
@@ -391,6 +433,7 @@ export class Player {
    */
   private fail(code: string) {
     if (this.failed) return;
+    devlog("fail", { code, ...this.snapshot() });
     this.failed = true;
     window.clearInterval(this.progress);
     this.progress = undefined;
@@ -425,11 +468,45 @@ export class Player {
     this.video = null;
   }
 
-  private onPlaying = () => this.emit({ type: "playing" });
-  private onWaiting = () => this.emit({ type: "buffering" });
-  private onEnded = () => this.emit({ type: "ended" });
-  private onMediaError = () =>
+  private onPlaying = () => {
+    devlog("video.playing", this.snapshot());
+    this.emit({ type: "playing" });
+  };
+  private onWaiting = () => {
+    devlog("video.waiting", this.snapshot());
+    this.emit({ type: "buffering" });
+  };
+  private onEnded = () => {
+    devlog("video.ended", this.snapshot());
+    this.emit({ type: "ended" });
+  };
+  private onMediaError = () => {
+    devlog("video.error", {
+      code: this.video?.error?.code,
+      message: this.video?.error?.message,
+      ...this.snapshot(),
+    });
     this.fail(this.mode === "finite" ? "FINITE_FORMAT_UNSUPPORTED" : "NOT_SUPPORTED");
+  };
+
+  /** Where the picture is and how much is buffered ahead of it, for the development log. */
+  private snapshot(): Record<string, unknown> {
+    const video = this.video;
+    if (!video || onTizen()) return {};
+    let ahead = 0;
+    for (let index = 0; index < video.buffered.length; index += 1) {
+      if (video.buffered.start(index) <= video.currentTime + 0.25) {
+        ahead = Math.max(ahead, video.buffered.end(index) - video.currentTime);
+      }
+    }
+    return {
+      pos: Math.round(video.currentTime * 10) / 10,
+      ahead: Math.round(ahead * 10) / 10,
+      ready: video.readyState,
+      level: this.hls?.currentLevel,
+      kbps: this.hls ? Math.round((this.hls.bandwidthEstimate || 0) / 1000) : undefined,
+    };
+  }
 
   play(
     url: string,
@@ -449,6 +526,7 @@ export class Player {
      * the only place the intent survived.
      */
     this.teardown(false);
+    this.attempt += 1;
     this.failed = false;
     this.held = false;
     this.mode = mode;
@@ -468,8 +546,11 @@ export class Player {
     // this point is a failure as far as the viewer is concerned.
     window.clearTimeout(this.watchdog);
     this.watchdog = window.setTimeout(() => this.fail("TIMEOUT"), START_TIMEOUT_MS);
-    if (onTizen()) this.playAVPlay(url, bufferSeconds, startSeconds);
-    else void this.playBrowser(url, browserRepair, startSeconds);
+    devlog("play", { url: where(url), mode, engine: onTizen() ? "avplay" : "browser" });
+    if (!onTizen()) void this.playBrowser(url, browserRepair, startSeconds);
+    else if (mode === "live" && (resolvedFor(url) || mightRedirect(url))) {
+      this.playTizenLive(url, bufferSeconds);
+    } else this.playAVPlay(url, bufferSeconds, startSeconds);
   }
 
   /**
@@ -539,8 +620,72 @@ export class Player {
    * called from, but close destroys the instance and the pipeline has to be rebuilt, which
    * is exactly the wrong thing to do when someone is holding the channel key down.
    */
-  private playAVPlay(url: string, bufferSeconds: number, startSeconds: number) {
+  /**
+   * A live channel on the television, by way of its temporary address where it has one.
+   *
+   * The same idea as the browser path, see services/liveAddress: a reconnection opens the address
+   * the panel last redirected to and asks for a fresh one alongside, and the first play learns that
+   * address by resolving the redirect itself, because AVPlay never says where it landed. Either
+   * way, a temporary address that fails hands over to the next one instead of to the viewer.
+   */
+  private playTizenLive(url: string, bufferSeconds: number) {
+    const attempt = this.attempt;
+    const stale = () => this.attempt !== attempt || this.failed;
+    const cached = resolvedFor(url);
+    if (cached) {
+      const refresh = refreshResolved(url);
+      devlog("live.cached", { url: where(url), to: where(cached) });
+      this.playAVPlay(cached, bufferSeconds, 0, () => {
+        if (resolvedFor(url) === cached) forgetResolved(url);
+        void refresh.then((fresh) => {
+          if (stale()) return;
+          devlog("live.switch", { to: where(fresh ?? url) });
+          this.playAVPlay(fresh ?? url, bufferSeconds, 0);
+        });
+      });
+      return;
+    }
+
+    void resolveRedirect(url).then((resolved) => {
+      if (stale()) return;
+      if (!resolved) {
+        this.playAVPlay(url, bufferSeconds, 0);
+        return;
+      }
+      devlog("live.resolved", { url: where(url), to: where(resolved) });
+      this.playAVPlay(resolved, bufferSeconds, 0, () => {
+        // The temporary address would not play here, perhaps tied to the client that asked for
+        // it. The original always worked, so it is the one to use.
+        if (resolvedFor(url) === resolved) forgetResolved(url);
+        if (!stale()) this.playAVPlay(url, bufferSeconds, 0);
+      });
+    });
+  }
+
+  /**
+   * `onDead` is where a failure goes instead of to the viewer, once: the address being played
+   * was a temporary one, and there is another to try. The start watchdog is rewound for it, so
+   * the second address gets the full time the first one had.
+   */
+  private playAVPlay(
+    url: string,
+    bufferSeconds: number,
+    startSeconds: number,
+    onDead?: () => void,
+  ) {
     const av = window.webapis!.avplay!;
+    let handed = false;
+    const die = (code: string) => {
+      if (!onDead || handed || this.failed) {
+        this.fail(code);
+        return;
+      }
+      handed = true;
+      devlog("avplay.dead", { code, url: where(url) });
+      window.clearTimeout(this.watchdog);
+      this.watchdog = window.setTimeout(() => this.fail("TIMEOUT"), START_TIMEOUT_MS);
+      window.setTimeout(onDead, 0);
+    };
     try {
       ensureSurface();
 
@@ -668,9 +813,9 @@ export class Player {
          * arrives first is the one the viewer sees. The message is appended rather than
          * substituted because services/errors.ts matches on the code.
          */
-        onerror: (code) => this.fail(withStatus(String(code), status)),
+        onerror: (code) => die(withStatus(String(code), status)),
         onerrormsg: (code, message) =>
-          this.fail(withStatus(`${String(code)} ${String(message)}`.trim(), status)),
+          die(withStatus(`${String(code)} ${String(message)}`.trim(), status)),
       });
 
       this.emit({ type: "buffering" });
@@ -680,10 +825,10 @@ export class Player {
           av.play(); // READY -> PLAYING
           this.emit({ type: "playing" });
         },
-        (e) => this.fail(codeOf(e)),
+        (e) => die(codeOf(e)),
       );
     } catch (e) {
-      this.fail(codeOf(e));
+      die(codeOf(e));
     }
   }
 
@@ -788,7 +933,16 @@ export class Player {
     }
   }
 
-  private async playBrowser(url: string, browserRepair: boolean, startSeconds: number) {
+  /**
+   * `forced` is a fresh temporary address that replaces a remembered one which failed. It is
+   * loaded as it is, with no remembering and no second replacement.
+   */
+  private async playBrowser(
+    url: string,
+    browserRepair: boolean,
+    startSeconds: number,
+    forced?: string,
+  ) {
     const video = this.video;
     if (!video) return;
     video.muted = this.muted;
@@ -807,6 +961,13 @@ export class Player {
     // then for a channel nobody is watching.
     if (this.video !== video || this.failed) return;
 
+    // A reconnection to a live channel goes straight to the temporary address it last redirected
+    // to, and asks the panel for a fresh one at the same time. See services/liveAddress.
+    const cached = this.mode === "live" && !forced ? resolvedFor(url) : undefined;
+    const source = forced ?? cached ?? url;
+    const refresh = cached ? refreshResolved(url) : undefined;
+    if (cached) devlog("live.cached", { url: where(url), to: where(cached) });
+
     // hls.js first, native second, and not the other way round. Chrome answers "maybe" to
     // canPlayType for HLS and then cannot play it, so asking the browser what it supports
     // sends every desktop down a path that fails. Where hls.js works it is the right
@@ -814,7 +975,7 @@ export class Player {
     // not run.
     if (!Hls.isSupported()) {
       if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = url;
+        video.src = source;
         this.tryPlay(video);
       } else {
         this.fail("NOT_SUPPORTED");
@@ -831,8 +992,12 @@ export class Player {
      */
     const hls = new Hls({
       pLoader: browserRepair ? createRepairingPlaylistLoader(Hls) : undefined,
-      // Nothing here touches how far behind live to sit. That is the standard's business,
-      // and the default already follows it.
+      // Fifty per cent further behind live than the three target durations the standard asks
+      // for at least, measured on a provider whose playlist reloads hang for twenty seconds at
+      // a time: the buffer in front of the playhead is what carries the picture through them.
+      liveSyncDurationCount: 4.5,
+      playlistLoadPolicy: RELOAD_POLICY,
+      ...(cached ? { manifestLoadPolicy: CACHED_MANIFEST_POLICY } : {}),
       //
       // What is overridden is memory, which is this application's business rather than the
       // specification's: the library assumes a desktop and will happily keep everything it
@@ -848,10 +1013,12 @@ export class Player {
       // best rendition arrives. The adaptive logic climbs from there within a few segments.
       startLevel: 0,
 
-      // A ceiling in front of the playhead, in time and in bytes. The library's own
-      // starting point of thirty seconds is left alone, this only stops it growing.
-      maxMaxBufferLength: 30,
-      maxBufferSize: 24 * 1000 * 1000,
+      // A ceiling in front of the playhead, in time and in bytes, fifty per cent above the
+      // library's thirty seconds so a live channel has that much more to play through a
+      // connection that stumbles.
+      maxBufferLength: 45,
+      maxMaxBufferLength: 45,
+      maxBufferSize: 36 * 1000 * 1000,
 
       // No part of these playlists is low latency HLS, so the machinery for it is cost
       // without benefit.
@@ -864,7 +1031,36 @@ export class Player {
     // checklist 4.6 says the viewer is told what went wrong and what to do about it.
     let left = 3;
     hls.on(Hls.Events.ERROR, (_e, data) => {
+      devlog("hls.error", {
+        fatal: data.fatal,
+        type: data.type,
+        details: data.details,
+        status: data.response?.code,
+        url: where(data.frag?.url ?? data.url),
+        left,
+        ...this.snapshot(),
+      });
       if (!data.fatal) return;
+
+      // The remembered temporary address is dead, most likely an expired token. Hand over to
+      // the fresh one being generated alongside it rather than spending the recovery budget.
+      const playlistFailure =
+        data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+        /^(manifest|level)Load/.test(String(data.details));
+      if (cached && playlistFailure) {
+        // Only the address that failed. The fresh one may already have replaced it.
+        if (resolvedFor(url) === cached) forgetResolved(url);
+        const attempt = this.attempt;
+        hls.destroy();
+        if (this.hls === hls) this.hls = null;
+        void (refresh ?? Promise.resolve(undefined)).then((fresh) => {
+          if (this.attempt !== attempt || this.video !== video || this.failed) return;
+          devlog("live.switch", { to: where(fresh ?? url) });
+          void this.playBrowser(url, browserRepair, startSeconds, fresh ?? url);
+        });
+        return;
+      }
+
       const recoverable =
         data.type === Hls.ErrorTypes.NETWORK_ERROR || data.type === Hls.ErrorTypes.MEDIA_ERROR;
       if (!recoverable || left-- <= 0) {
@@ -881,15 +1077,43 @@ export class Player {
         hls.recoverMediaError();
       }
     });
+    hls.on(Hls.Events.LEVEL_LOADED, (_event, data) => {
+      const details = data.details;
+      devlog("hls.level", {
+        level: data.level,
+        live: details.live,
+        target: details.targetduration,
+        fragments: details.fragments.length,
+        lastSn: details.endSN,
+        ms: Math.round(data.stats.loading.end - data.stats.loading.start),
+        url: where(details.url),
+      });
+    });
+    hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
+      const stats = data.frag.stats;
+      devlog("hls.frag", {
+        sn: data.frag.sn,
+        dur: Math.round(data.frag.duration * 10) / 10,
+        ms: Math.round(stats.loading.end - stats.loading.start),
+        kb: Math.round(stats.total / 1024),
+        url: where(data.frag.url),
+        ...this.snapshot(),
+      });
+    });
     hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
       if (this.lastLevel >= 0 && this.lastLevel !== data.level) this.switches += 1;
       this.lastLevel = data.level;
     });
+    // Remember where the panel redirected, for the next reconnection. A remembered or fresh
+    // address is already where it lands, and a redirect from it is the same token moving.
+    if (this.mode === "live" && source === url) {
+      hls.on(Hls.Events.MANIFEST_LOADED, (_event, data) => rememberResolved(url, data.url));
+    }
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       if (this.mode === "finite" && startSeconds > 0) video.currentTime = startSeconds;
       this.tryPlay(video);
     });
-    hls.loadSource(url);
+    hls.loadSource(source);
     hls.attachMedia(video);
   }
 

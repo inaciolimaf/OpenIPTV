@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { devLog } from "./scripts/dev-log.mjs";
 import { devRemoteBridge } from "./scripts/dev-remote-bridge.mjs";
 import { handleHttpRelay } from "./scripts/http-relay.mjs";
 
@@ -12,6 +13,7 @@ export default defineConfig({
   plugins: [
     react(),
     devRemoteBridge(),
+    devLog(),
     {
       name: "openiptv-http-relay",
       configureServer(server) {

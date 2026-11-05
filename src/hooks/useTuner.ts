@@ -1,3 +1,4 @@
+import { devlog, where } from "../services/devlog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { releaseLogos } from "../services/logos";
 import type { Fit } from "../services/player";
@@ -444,6 +445,7 @@ export function useTuner(options: TunerOptions): Tuner {
       streamFallbackTried.current !== streamKey
     ) {
       streamFallbackTried.current = streamKey;
+      devlog("tuner.fallback", { fault, from: where(target.url), to: where(target.fallbackUrl) });
       const retried = { ...target, url: target.fallbackUrl, fallbackUrl: undefined };
       currentRef.current = retried;
       setCurrent(retried);
@@ -463,6 +465,7 @@ export function useTuner(options: TunerOptions): Tuner {
     if (!fallback || httpFallbackTried.current === attemptKey) return;
 
     httpFallbackTried.current = attemptKey;
+    devlog("tuner.httpFallback", { fault, from: where(target.url), to: where(fallback) });
     const downgraded = { ...target, url: fallback };
     currentRef.current = downgraded;
     setCurrent(downgraded);
@@ -539,6 +542,7 @@ export function useTuner(options: TunerOptions): Tuner {
     if (attempts.current >= RETRY_DELAYS_MS.length) return;
 
     const wait = RETRY_DELAYS_MS[attempts.current];
+    devlog("tuner.retry", { fault, attempt: attempts.current + 1, wait, name: current.name });
     const due = Date.now() + wait;
     setRetryIn(Math.ceil(wait / 1000));
 
