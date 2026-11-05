@@ -81,6 +81,9 @@ export default defineConfig({
     chunkSizeWarningLimit: 1500,
   },
   server: { port: 5173, host: true },
+  // Behind a reverse proxy (the Dockerfile sets this), the proxy decides which host names reach
+  // the container, so the preview server accepts whichever one it forwards.
+  preview: process.env.OPENIPTV_ANY_HOST ? { allowedHosts: true } : undefined,
 
   /*
    * Tests run through Vite rather than through node --test.
