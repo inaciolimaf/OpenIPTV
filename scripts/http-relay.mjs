@@ -18,8 +18,19 @@ export const blockedHttpRelayHost = (hostname) => {
       (a === 192 && b === 168)
     );
   }
-  return isIP(host) === 6;
+  return isIP(host) === 6 && blockedIPv6(host);
 };
+
+// Only loopback, unspecified, unique local (fc00::/7), link local (fe80::/10) and IPv4 mapped
+// private addresses. Blocking every IPv6 address blocked every dual stack host, since a lookup
+// with all: true returns both families and one blocked address refuses the whole host.
+function blockedIPv6(address) {
+  const host = address.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "::1" || host === "::") return true;
+  if (/^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)) return true;
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(host);
+  return mapped ? blockedHttpRelayHost(mapped[1]) : false;
+}
 
 const relayAddress = (address) =>
   `${HTTP_RELAY_PATH}?url=${encodeURIComponent(address.toString())}`;

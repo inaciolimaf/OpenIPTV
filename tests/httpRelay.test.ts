@@ -52,3 +52,17 @@ test("HTTP relay rewrites HLS segments and keys through the local endpoint", () 
   );
   expect(rewritten).toContain("https://secure.example.com/segment.ts");
 });
+
+test("HTTP relay blocks private IPv6 but allows public dual stack hosts", async () => {
+  expect(blockedHttpRelayHost("::1")).toBe(true);
+  expect(blockedHttpRelayHost("fd12:3456::1")).toBe(true);
+  expect(blockedHttpRelayHost("fe80::1")).toBe(true);
+  expect(blockedHttpRelayHost("::ffff:192.168.1.2")).toBe(true);
+  expect(blockedHttpRelayHost("2606:4700:10::6814:179a")).toBe(false);
+  expect(
+    await resolveHttpRelayTarget(new URL("http://media.example.com/a.m3u8"), async () => [
+      { address: "104.20.23.154", family: 4 },
+      { address: "2606:4700:10::6814:179a", family: 6 },
+    ]),
+  ).toEqual({ address: "104.20.23.154", family: 4 });
+});
